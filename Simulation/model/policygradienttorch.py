@@ -95,12 +95,15 @@ class REINFORCE:
         self.trajectory = Trajectory()
 
     def remember(self, state, action, reward, log_prob):
+        action, log_prob = self.select_action(state)
         self.trajectory.append(state, action, reward, log_prob)
 
     def select_action(self, state):
         probs = self.policy_network(self.encode_state(state).to(self.device))
         action = torch.multinomial(probs, 1).item()
-        return action, probs
+        log_prob = torch.log(probs[action])  # Log probability of the selected action
+        return action, log_prob
+
 
     def train(self):
         discounted_rewards_tensor = self.trajectory.compute_returns(self.device, self.gamma)
@@ -109,18 +112,21 @@ class REINFORCE:
             state_value.append(self.value_network(self.encode_state(state).to(self.device)))
         print(state_value)
         state_value_tensor = torch.stack(state_value).float()
-        print(f'State Tensor:\n {state_value_tensor}')
-        print(f'Reward Tensor:\n {discounted_rewards_tensor}')
+        # print(f'State Tensor:\n {state_value_tensor}')
+        # print(f'Reward Tensor:\n {discounted_rewards_tensor}')
         value_loss = self.value_loss_fn(state_value_tensor, discounted_rewards_tensor)
         self.value_optimizer.zero_grad()
         value_loss.backward()
         self.value_optimizer.step()
 
+        # state_value_tensor = torch.stack(state_value).squeeze()
+        # discounted_rewards_tensor = discounted_rewards_tensor.squeeze()
         advantages = discounted_rewards_tensor - state_value_tensor
+
         advantages = advantages.detach()
         log_probs_tensor = torch.stack(self.trajectory.log_probs)
-        print(f"log_probs_tensor shape: \n{log_probs_tensor.shape},\n {log_probs_tensor}")
-        print(f"advantages shape: \n{advantages.shape},\n {advantages}")
+        # print(f"log_probs_tensor shape: \n{log_probs_tensor.shape},\n {log_probs_tensor}")
+        # print(f"advantages shape: \n{advantages.shape},\n {advantages}")
 
         policy_loss = -torch.sum(log_probs_tensor.to(self.device) * advantages.to(self.device))
         self.policy_optimizer.zero_grad()

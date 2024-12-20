@@ -50,13 +50,17 @@ class Agent:
 
     def step(self, action):
         self.game_steps += 1
-        self.visited_states = set()
+        self.visited_states = []
         terminated, truncated, info = False, False, {'Success': False}
         direction = np.array((self.env.directions[action][0], self.env.directions[action][1]))
-        old_position = self.position
+        old_position = [self.position[0], self.position[1]]
         new_position = [self.position[0] + direction[0], self.position[1] + direction[1]]
+        # print(f"Destination : {self.env.destination}")
+        # print(f"Valid Position : {self.env.is_valid_position(new_position)}")
         if self.env.is_valid_position(new_position):
+            # print(f"Before moving : {old_position}")
             self.move(direction)
+            # print(f"After moving : {old_position}")
             if np.array_equal(self.position, self.env.destination):
                 reward = 5.0
                 print(f'\nInfo: HURRAY!! Agent has reached its destination...')
@@ -64,26 +68,35 @@ class Agent:
                 terminated = True
                 self.game_steps = 0
             else:
+                # print("Coming here")
                 reward = 0.05
-                # if self.position not in self.visited_states:
-                #     reward += 0.05
-                #     self.visited_states.append(self.position)
-                # else:
-                #     reward -= 0.07
+                if self.position not in self.visited_states:
+                    reward += 0.08
+                    self.visited_states.append(self.position)
+                else:
+                    reward -= 0.2
                 
+                # print(f"REWARDDDD: {reward}")
+                
+                # print(f"Old Position : {old_position}")
+                # print(f"New Position : {new_position}")
                 current_dist_to_goal = np.linalg.norm(np.array(old_position) - np.array(self.env.destination))
                 next_dist_to_goal = np.linalg.norm(np.array(new_position) - np.array(self.env.destination))
+                # print(f"Current distance: {current_dist_to_goal}")
+                # print(f"Next distance: {next_dist_to_goal}")
                 if next_dist_to_goal >= current_dist_to_goal:
-                    reward -= 0.1
+                    reward -= 0.07
                 else:
-                    reward += 0.05
+                    reward += 0.1
+                # print(f"REWARDDDD: {reward}")
                 
         else:
             reward = -0.75
             terminated = True
             self.game_steps = 0
+        print(f"Reward : {reward}")
 
-        return self._get_state(), reward, terminated, truncated, info
+        return self._get_state(), reward, terminated, truncated, info, new_position
 
     def train_value_agent(self, episodes, render):
         print(f'Info: Agent Training has been started over the Maze Simulation...')
@@ -96,9 +109,12 @@ class Agent:
         training_error = np.zeros(episodes)
 
         time_steps, saved_model = 0, False
+        max_return = 0
         for episode in range(episodes):
             state = self.reset()
             done, returns, step, success_status, loss = False, 0, 0, 0, 0.0
+            path = [f"({self.position[0]}, {self.position[1]})"]
+
             while True:
                 self.env.update_display(self) if render else None
                 time_steps += 1
@@ -107,7 +123,8 @@ class Agent:
                     self.model.update_target_network()
 
                 action = self.model.act(state)
-                new_state, reward, terminated, truncated, info = self.step(action)
+                new_state, reward, terminated, truncated, info, new_position = self.step(action)
+                path.append(f"({new_position[0]}, {new_position[1]})")
 
                 self.model.remember(state, action, reward, new_state, terminated)
 
@@ -124,7 +141,7 @@ class Agent:
                     print(f"Episode {episode + 1}/{episodes} - Steps: {step}, Return: {returns:.2f}, Epsilon: "
                           f"{self.model.epsilon:.3f}, Loss: {loss:0.4f}")
                     break
-
+                
                 if len(self.model.replay_buffer.buffer) > self.batch_size:
                     loss = self.model.train(self.batch_size)
             self.model.epsilon = max(self.model.epsilon * self.model.epsilon_decay, self.model.epsilon_min)
@@ -133,11 +150,13 @@ class Agent:
             epsilon_history[episode] = self.model.epsilon
             steps_per_episode[episode] = step
             training_error[episode] = loss
+            max_return = max(max_return, returns)
+            print(f"Path: {path}")
+            print(f"Max Return: {max_return}")
+            print(f'-' * 147)
 
-        print(f'-' * 147)
         if not saved_model:
             self.save_model(is_policy_model=False)
-        print(f'-' * 147)
         return [returns_per_episode, epsilon_history, training_error, steps_per_episode, None]
 
     def test_value_agent(self, episodes, render):
@@ -163,12 +182,16 @@ class Agent:
         for episode in range(episodes):
             state = self.reset()
             done, returns, step, success_status = False, 0, 0, 0
+            path = [f"({self.position[0]}, {self.position[1]})"]
+
             while not done:
                 self.env.update_display(self) if render else None
                 with torch.no_grad():
                     action = self.model.main_network(self.model.encode_state(state).to(self.device)).argmax().item()
 
-                new_state, reward, terminated, truncated, info = self.step(action)
+                new_state, reward, terminated, truncated, info, new_position = self.step(action)
+                path.append(f"({new_position[0]}, {new_position[1]})")
+
 
                 state = new_state
                 step += 1
@@ -178,8 +201,9 @@ class Agent:
                 if info['Success']:
                     success_status = 1
             print(f'Episode {episode + 1}/{episodes} - Steps: {step}, Return: {returns:.2f}')
+            print(f"Path: {path}")
+            print(f'-' * 147)
             success_rate[episode] = success_status
-        print(f'-' * 147)
         print(f'Info: Testing has been completed...')
         return [None, None, None, None, success_rate]
 
@@ -192,15 +216,18 @@ class Agent:
         returns_per_episode = np.zeros(episodes)
         steps_per_episode = np.zeros(episodes)
         training_error = np.zeros((episodes, 2))
-
+        maxRet = -100000000
         saved_model = False
+        success_count = 0
         for episode in range(episodes):
             state = self.reset()
             done, returns, step, success_status, loss = False, 0, 0, 0, 0.0
+            path = [f"({self.position[0]}, {self.position[1]})"]
             while True:
                 self.env.update_display(self) if render else None
                 action, log_prob = self.model.select_action(state)
-                new_state, reward, terminated, truncated, info = self.step(action)
+                new_state, reward, terminated, truncated, info, new_position = self.step(action)
+                path.append(f"({new_position[0]}, {new_position[1]})")
 
                 self.model.trajectory.append(state, action, reward, log_prob)
 
@@ -212,6 +239,7 @@ class Agent:
                 if info['Success']:
                     self.save_model(is_policy_model=True)
                     saved_model = True
+                    success_count += 1
 
                 if done:
                     returns_per_episode[episode] = returns
@@ -223,8 +251,12 @@ class Agent:
             training_error[episode, 1] = value_loss
             self.model.trajectory.clear()
             print(f"Episode {episode + 1}/{episodes} - Steps: {step}, Return: {returns:.2f}, Loss: {policy_loss:0.4f}")
+            maxRet = max(maxRet, returns)
+            print(f"Max Return: {maxRet}")
+            print(f"Path: {path}")
+            print(f"Success Count: {success_count}")
+            print(f'-----------------------------------------------------')
 
-        print(f'-' * 147)
         if not saved_model:
             self.save_model(is_policy_model=True)
         return [returns_per_episode, None, training_error, steps_per_episode, None]
@@ -249,16 +281,21 @@ class Agent:
             exit(0)
         self.model.policy_network.eval()
 
+
         for episode in range(episodes):
             state = self.reset()
             done, returns, step, success_status = False, 0, 0, 0
+            path = [f"({self.position[0]}, {self.position[1]})"]
+
 
             while not done:
                 self.env.update_display(self) if render else None
                 with torch.no_grad():
                     action_probs = self.model.policy_network(self.model.encode_state(state).to(self.device))
                     action = action_probs.argmax().item()
-                new_state, reward, terminated, truncated, info = self.step(action)
+                new_state, reward, terminated, truncated, info, new_position = self.step(action)
+                path.append(f"({new_position[0]}, {new_position[1]})")
+
 
                 state = new_state
                 step += 1
@@ -268,8 +305,9 @@ class Agent:
                 if info['Success']:
                     success_status = 1
             print(f'Episode {episode + 1}/{episodes} - Steps: {step}, Return: {returns:.2f}')
+            print(f"Path: {path}")
+            print(f'-' * 147)
             success_rate[episode] = success_status
-        print(f'-' * 147)
         print(f'Info: Testing has been completed...')
         return [None, None, None, None, success_rate]
 

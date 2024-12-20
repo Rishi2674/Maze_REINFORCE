@@ -15,7 +15,7 @@
     "NUM_OBSTACLE": 0.2,
     "TEST_EPISODES": 50,
     "BATCH_SIZE": 64,
-    "GAMMA": 0.9,
+    "GAMMA": 0.99,
     "ALPHA": 0.001,
     "EPSILON": 1,
     "EPSILON_MIN": 0.010,
