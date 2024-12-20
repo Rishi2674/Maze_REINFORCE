@@ -69,9 +69,9 @@ class Agent:
                 self.game_steps = 0
             else:
                 # print("Coming here")
-                reward = 0.05
+                reward = 0.5
                 if self.position not in self.visited_states:
-                    reward += 0.08
+                    reward += 0.1
                     self.visited_states.append(self.position)
                 else:
                     reward -= 0.2
